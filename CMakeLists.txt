@@ -33,9 +33,16 @@ project(MicroMouse_Robot C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
-# Add executable. Default name is the project name, version 0.1
+# Add source files
+set(SOURCES
+    MicroMouse_Robot.c
+    src/tof/tof.c
+    src/motor/motor.c
+    src/encoder/encoder.c
+)
 
-add_executable(MicroMouse_Robot MicroMouse_Robot.c )
+# Add executable
+add_executable(MicroMouse_Robot ${SOURCES})
 
 pico_set_program_name(MicroMouse_Robot "MicroMouse_Robot")
 pico_set_program_version(MicroMouse_Robot "0.1")

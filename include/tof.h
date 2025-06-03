@@ -3,6 +3,9 @@
 
 #include "pico/stdlib.h"
 #include "hardware/i2c.h"
+#include "hardware/gpio.h"
+#include <stdbool.h>
+#include <stdint.h>
 
 // I2C defines
 #define TOF_PORT i2c0
@@ -20,7 +23,11 @@
 void init_tof(void);
 void reset_i2c_bus(void);
 bool verify_i2c_bus(void);
+bool vl6180x_init(uint8_t addr);
+bool vl6180x_change_addr(uint8_t old_addr, uint8_t new_addr);
 uint8_t vl6180x_read_range(uint8_t addr);
 void scan_i2c_bus(void);
+void vl6180x_write8(uint8_t addr, uint16_t reg, uint8_t value);
+uint8_t vl6180x_read8(uint8_t addr, uint16_t reg);
 
 #endif // TOF_H 
