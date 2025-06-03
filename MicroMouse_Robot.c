@@ -32,13 +32,13 @@
 #define TOF_PORT i2c0
 #define TOF_SDA 0
 #define TOF_SCL 1
-#define TOF1_SHDN 18  // Left sensor
-#define TOF2_SHDN 19  // Front sensor
-#define TOF3_SHDN 20  // Right sensor
+#define TOF1_SHDN 18  // Right sensor (was incorrectly labeled as Left)
+#define TOF2_SHDN 19  // Left sensor (was incorrectly labeled as Front)
+#define TOF3_SHDN 20  // Front sensor (was incorrectly labeled as Right)
 #define TOF_DEFAULT_ADDR 0x29  // Default VL6180X address
-#define TOF1_ADDR 0x2A  // Left sensor address
-#define TOF2_ADDR 0x2B  // Front sensor address
-#define TOF3_ADDR 0x2C  // Right sensor address
+#define TOF1_ADDR 0x2A  // Right sensor address
+#define TOF2_ADDR 0x2B  // Left sensor address
+#define TOF3_ADDR 0x2C  // Front sensor address
 
 // Data will be copied from src to dst
 const char src[] = "Hello, world! (from DMA)";
@@ -176,10 +176,10 @@ bool vl6180x_init(uint8_t addr) {
     vl6180x_write8(addr, 0x01A7, 0x1F);
     vl6180x_write8(addr, 0x0030, 0x00);
 
-    // Recommended public register configuration
+    // Recommended public register configuration with more aggressive ambient light handling
     vl6180x_write8(addr, 0x0011, 0x10);  // Enable range and ambient light measurement
-    vl6180x_write8(addr, 0x010A, 0x30);  // Set ALS integration time to 100ms
-    vl6180x_write8(addr, 0x003F, 0x46);  // Set ALS gain to 20
+    vl6180x_write8(addr, 0x010A, 0x20);  // Set ALS integration time to 50ms (reduced from 100ms)
+    vl6180x_write8(addr, 0x003F, 0x40);  // Set ALS gain to 10 (reduced from 20)
     vl6180x_write8(addr, 0x0031, 0xFF);  // Set ALS threshold to maximum
     vl6180x_write8(addr, 0x0040, 0x63);  // Set ALS analog gain to 1.0
     vl6180x_write8(addr, 0x002E, 0x01);  // Set ALS auto gain to enabled
@@ -322,42 +322,66 @@ void init_tof() {
     gpio_put(TOF3_SHDN, false);
     sleep_ms(10);  // let them power down fully
 
-    // ----- Initialize LEFT sensor first -----
-    printf("\nInitializing left sensor...\n");
-    // Turn ON left sensor only:
+    // ----- Initialize RIGHT sensor first -----
+    printf("\nInitializing right sensor...\n");
+    // Turn ON right sensor only:
     gpio_put(TOF1_SHDN, true);
     sleep_ms(100);  // wait for it to boot
     
     // Check its model ID at the default address (0x29)
     uint8_t model_id = vl6180x_read8(TOF_DEFAULT_ADDR, 0x0000);
+    printf("Right sensor model ID: 0x%02x (should be 0xB4)\n", model_id);
+    if (model_id != 0xB4) {
+        printf("Error: Right sensor not responding at default address\n");
+        return;
+    }
+    // Run the standard VL6180 init sequence (writing all priv/pub regs)
+    if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
+        printf("Failed to initialize right sensor\n");
+        return;
+    }
+    // Change its I²C address to 0x2A
+    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF1_ADDR)) {
+        printf("Failed to change right sensor address\n");
+        return;
+    }
+    // Verify
+    model_id = vl6180x_read8(TOF1_ADDR, 0x0000);
+    printf("Right sensor model ID at new address (0x%02x): 0x%02x\n", TOF1_ADDR, model_id);
+    sleep_ms(100);
+
+    // ----- Initialize LEFT sensor next -----
+    printf("\nInitializing left sensor...\n");
+    // Turn ON left sensor
+    gpio_put(TOF2_SHDN, true);
+    sleep_ms(100);
+
+    // Read at default address (0x29), since only the newly-enabled left is at 0x29
+    model_id = vl6180x_read8(TOF_DEFAULT_ADDR, 0x0000);
     printf("Left sensor model ID: 0x%02x (should be 0xB4)\n", model_id);
     if (model_id != 0xB4) {
         printf("Error: Left sensor not responding at default address\n");
         return;
     }
-    // Run the standard VL6180 init sequence (writing all priv/pub regs)
     if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
         printf("Failed to initialize left sensor\n");
         return;
     }
-    // Change its I²C address to 0x2A
-    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF1_ADDR)) {
+    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF2_ADDR)) {
         printf("Failed to change left sensor address\n");
         return;
     }
-    // Verify
-    model_id = vl6180x_read8(TOF1_ADDR, 0x0000);
-    printf("Left sensor model ID at new address (0x%02x): 0x%02x\n", TOF1_ADDR, model_id);
+    model_id = vl6180x_read8(TOF2_ADDR, 0x0000);
+    printf("Left sensor model ID at new address (0x%02x): 0x%02x\n", TOF2_ADDR, model_id);
     sleep_ms(100);
 
-    // ----- Initialize FRONT sensor next -----
+    // ----- Initialize FRONT sensor last -----
     printf("\nInitializing front sensor...\n");
-    // Turn ON front sensor (others that respond at default 0x29 are still off;
-    // left is ON but now lives at 0x2A, not 0x29, so no address conflict)
-    gpio_put(TOF2_SHDN, true);
+    // Turn ON front sensor
+    gpio_put(TOF3_SHDN, true);
     sleep_ms(100);
 
-    // Read at default address (0x29), since only the newly-enabled front is at 0x29
+    // Again, only "front" is at 0x29 now
     model_id = vl6180x_read8(TOF_DEFAULT_ADDR, 0x0000);
     printf("Front sensor model ID: 0x%02x (should be 0xB4)\n", model_id);
     if (model_id != 0xB4) {
@@ -368,37 +392,12 @@ void init_tof() {
         printf("Failed to initialize front sensor\n");
         return;
     }
-    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF2_ADDR)) {
+    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF3_ADDR)) {
         printf("Failed to change front sensor address\n");
         return;
     }
-    model_id = vl6180x_read8(TOF2_ADDR, 0x0000);
-    printf("Front sensor model ID at new address (0x%02x): 0x%02x\n", TOF2_ADDR, model_id);
-    sleep_ms(100);
-
-    // ----- Initialize RIGHT sensor last -----
-    printf("\nInitializing right sensor...\n");
-    // Turn ON right sensor
-    gpio_put(TOF3_SHDN, true);
-    sleep_ms(100);
-
-    // Again, only "right" is at 0x29 now
-    model_id = vl6180x_read8(TOF_DEFAULT_ADDR, 0x0000);
-    printf("Right sensor model ID: 0x%02x (should be 0xB4)\n", model_id);
-    if (model_id != 0xB4) {
-        printf("Error: Right sensor not responding at default address\n");
-        return;
-    }
-    if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
-        printf("Failed to initialize right sensor\n");
-        return;
-    }
-    if (!vl6180x_change_addr(TOF_DEFAULT_ADDR, TOF3_ADDR)) {
-        printf("Failed to change right sensor address\n");
-        return;
-    }
     model_id = vl6180x_read8(TOF3_ADDR, 0x0000);
-    printf("Right sensor model ID at new address (0x%02x): 0x%02x\n", TOF3_ADDR, model_id);
+    printf("Front sensor model ID at new address (0x%02x): 0x%02x\n", TOF3_ADDR, model_id);
 
     printf("\n=== ToF Initialization Complete ===\n");
 }
@@ -410,10 +409,11 @@ uint8_t vl6180x_read_range(uint8_t addr) {
         printf("Error: Sensor at 0x%02x reports error status: 0x%02x\n", addr, status);
         if (status == 0x04) {
             printf("Ambient light overflow detected. Adjusting sensor configuration...\n");
-            // Try to reduce sensitivity to ambient light
-            vl6180x_write8(addr, 0x010A, 0x20);  // Reduce ALS integration time
-            vl6180x_write8(addr, 0x003F, 0x40);  // Reduce ALS gain
-            sleep_ms(50);  // Give sensor time to adjust
+            // More aggressive ambient light handling
+            vl6180x_write8(addr, 0x010A, 0x10);  // Reduce ALS integration time to 25ms
+            vl6180x_write8(addr, 0x003F, 0x20);  // Reduce ALS gain to 5
+            vl6180x_write8(addr, 0x0040, 0x40);  // Reduce ALS analog gain to 0.5
+            sleep_ms(100);  // Give sensor more time to adjust
         }
         return 255;
     }
@@ -441,10 +441,11 @@ uint8_t vl6180x_read_range(uint8_t addr) {
         printf("Error: Sensor at 0x%02x reports error: 0x%02x\n", addr, error);
         if (error == 0x04) {
             printf("Ambient light overflow detected. Adjusting sensor configuration...\n");
-            // Try to reduce sensitivity to ambient light
-            vl6180x_write8(addr, 0x010A, 0x20);  // Reduce ALS integration time
-            vl6180x_write8(addr, 0x003F, 0x40);  // Reduce ALS gain
-            sleep_ms(50);  // Give sensor time to adjust
+            // More aggressive ambient light handling
+            vl6180x_write8(addr, 0x010A, 0x10);  // Reduce ALS integration time to 25ms
+            vl6180x_write8(addr, 0x003F, 0x20);  // Reduce ALS gain to 5
+            vl6180x_write8(addr, 0x0040, 0x40);  // Reduce ALS analog gain to 0.5
+            sleep_ms(100);  // Give sensor more time to adjust
         }
     }
     
@@ -661,29 +662,29 @@ int main() {
         }
 
         // Read all ToF sensors with error handling
-        uint8_t left_range = vl6180x_read_range(TOF1_ADDR);
-        if (left_range == 255) {
-            printf("Left sensor read failed, retrying...\n");
-            reset_i2c_bus();
-            left_range = vl6180x_read_range(TOF1_ADDR);
-        }
-        
-        uint8_t front_range = vl6180x_read_range(TOF2_ADDR);
-        if (front_range == 255) {
-            printf("Front sensor read failed, retrying...\n");
-            reset_i2c_bus();
-            front_range = vl6180x_read_range(TOF2_ADDR);
-        }
-        
-        uint8_t right_range = vl6180x_read_range(TOF3_ADDR);
+        uint8_t right_range = vl6180x_read_range(TOF1_ADDR);  // Right sensor
         if (right_range == 255) {
             printf("Right sensor read failed, retrying...\n");
             reset_i2c_bus();
-            right_range = vl6180x_read_range(TOF3_ADDR);
+            right_range = vl6180x_read_range(TOF1_ADDR);
         }
         
-        printf("ToF Readings - Left: %d mm, Front: %d mm, Right: %d mm\n", 
-               left_range, front_range, right_range);
+        uint8_t left_range = vl6180x_read_range(TOF2_ADDR);   // Left sensor
+        if (left_range == 255) {
+            printf("Left sensor read failed, retrying...\n");
+            reset_i2c_bus();
+            left_range = vl6180x_read_range(TOF2_ADDR);
+        }
+        
+        uint8_t front_range = vl6180x_read_range(TOF3_ADDR);  // Front sensor
+        if (front_range == 255) {
+            printf("Front sensor read failed, retrying...\n");
+            reset_i2c_bus();
+            front_range = vl6180x_read_range(TOF3_ADDR);
+        }
+        
+        printf("ToF Readingst - Right: %d mm, Left: %d mm, Front: %d mm\n", 
+               right_range, left_range, front_range);
 
         // Print encoder values and heartbeat
         printf("L Enc: %ld, R Enc: %ld\n", leftEncoderCount, rightEncoderCount);
