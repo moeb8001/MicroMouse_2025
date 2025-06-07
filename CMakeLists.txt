@@ -39,6 +39,8 @@ set(SOURCES
     src/tof/tof.c
     src/motor/motor.c
     src/encoder/encoder.c
+    src/controller/controller.c
+    src/imu/imu.c
 )
 
 # Add executable

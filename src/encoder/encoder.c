@@ -78,4 +78,12 @@ void encoder_callback(uint gpio, uint32_t events) {
 void reset_encoders(void) {
     leftEncoderCount = 0;
     rightEncoderCount = 0;
+}
+
+int32_t get_left_encoder_count(void) {
+    return leftEncoderCount;
+}
+
+int32_t get_right_encoder_count(void) {
+    return rightEncoderCount;
 } 

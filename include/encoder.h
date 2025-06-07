@@ -19,5 +19,7 @@ extern volatile uint8_t lastRightState;
 void init_encoders(void);
 void encoder_callback(uint gpio, uint32_t events);
 void reset_encoders(void);
+int32_t get_left_encoder_count(void);
+int32_t get_right_encoder_count(void);
 
 #endif // ENCODER_H 

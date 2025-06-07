@@ -29,5 +29,7 @@ uint8_t vl6180x_read_range(uint8_t addr);
 void scan_i2c_bus(void);
 void vl6180x_write8(uint8_t addr, uint16_t reg, uint8_t value);
 uint8_t vl6180x_read8(uint8_t addr, uint16_t reg);
+bool vl6180x_is_present(uint8_t addr);
+uint8_t vl6180x_read_model_id(uint8_t addr);
 
 #endif // TOF_H 

@@ -3,12 +3,15 @@
 
 // Initialize ToF sensors
 void init_tof(void) {
+    printf("\n=== ToF Sensor Initialization ===\n");
+    
     // Initialize I2C
     i2c_init(TOF_PORT, 50 * 1000);  // 50 kHz
     gpio_set_function(TOF_SDA, GPIO_FUNC_I2C);
     gpio_set_function(TOF_SCL, GPIO_FUNC_I2C);
     gpio_pull_up(TOF_SDA);
     gpio_pull_up(TOF_SCL);
+    printf("I2C initialized at 50kHz\n");
 
     // Configure shutdown pins
     gpio_init(TOF1_SHDN);
@@ -17,11 +20,16 @@ void init_tof(void) {
     gpio_set_dir(TOF1_SHDN, GPIO_OUT);
     gpio_set_dir(TOF2_SHDN, GPIO_OUT);
     gpio_set_dir(TOF3_SHDN, GPIO_OUT);
+    printf("Shutdown pins configured\n");
 
     // Initialize sensors one at a time
     // Right sensor
-    gpio_put(TOF1_SHDN, 1);
+    printf("\nInitializing right sensor...\n");
+    gpio_put(TOF1_SHDN, 0);  // First ensure it's off
     sleep_ms(10);
+    gpio_put(TOF1_SHDN, 1);  // Then turn it on
+    sleep_ms(50);  // Give it more time to wake up
+    
     if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
         printf("Failed to initialize right sensor\n");
         return;
@@ -30,11 +38,16 @@ void init_tof(void) {
         printf("Failed to change right sensor address\n");
         return;
     }
+    printf("Right sensor initialized at address 0x%02x\n", TOF1_ADDR);
     sleep_ms(50);
 
     // Left sensor
-    gpio_put(TOF2_SHDN, 1);
+    printf("\nInitializing left sensor...\n");
+    gpio_put(TOF2_SHDN, 0);
     sleep_ms(10);
+    gpio_put(TOF2_SHDN, 1);
+    sleep_ms(50);
+    
     if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
         printf("Failed to initialize left sensor\n");
         return;
@@ -43,11 +56,16 @@ void init_tof(void) {
         printf("Failed to change left sensor address\n");
         return;
     }
+    printf("Left sensor initialized at address 0x%02x\n", TOF2_ADDR);
     sleep_ms(50);
 
     // Front sensor
-    gpio_put(TOF3_SHDN, 1);
+    printf("\nInitializing front sensor...\n");
+    gpio_put(TOF3_SHDN, 0);
     sleep_ms(10);
+    gpio_put(TOF3_SHDN, 1);
+    sleep_ms(50);
+    
     if (!vl6180x_init(TOF_DEFAULT_ADDR)) {
         printf("Failed to initialize front sensor\n");
         return;
@@ -56,7 +74,13 @@ void init_tof(void) {
         printf("Failed to change front sensor address\n");
         return;
     }
+    printf("Front sensor initialized at address 0x%02x\n", TOF3_ADDR);
     sleep_ms(50);
+
+    // Scan I2C bus to verify all sensors are present
+    printf("\nScanning I2C bus for all sensors...\n");
+    scan_i2c_bus();
+    printf("=== ToF Initialization Complete ===\n\n");
 }
 
 // Reset I2C bus
@@ -121,16 +145,16 @@ bool vl6180x_init(uint8_t addr) {
     vl6180x_write8(addr, 0x01A7, 0x1F);
     vl6180x_write8(addr, 0x0030, 0x00);
 
-    // More conservative ambient light handling
-    vl6180x_write8(addr, 0x0011, 0x10);  // Enable range and ambient light measurement
-    vl6180x_write8(addr, 0x010A, 0x10);  // Set ALS integration time to 25ms (reduced from 50ms)
-    vl6180x_write8(addr, 0x003F, 0x20);  // Set ALS gain to 5 (reduced from 10)
-    vl6180x_write8(addr, 0x0031, 0xFF);  // Set ALS threshold to maximum
-    vl6180x_write8(addr, 0x0040, 0x40);  // Set ALS analog gain to 0.5 (reduced from 1.0)
-    vl6180x_write8(addr, 0x002E, 0x01);  // Set ALS auto gain to enabled
-    vl6180x_write8(addr, 0x001B, 0x09);  // Set range check to enabled
-    vl6180x_write8(addr, 0x003E, 0x31);  // Set range timing to 100ms
-    vl6180x_write8(addr, 0x0014, 0x24);  // Set range interrupt to enabled
+    // Balanced ambient light handling - reduce sensitivity but keep functionality
+    vl6180x_write8(addr, 0x0011, 0x10);  // Enable range measurement only (no ALS)
+    vl6180x_write8(addr, 0x010A, 0x30);  // Set ALS integration time to 50ms (standard)
+    vl6180x_write8(addr, 0x003F, 0x46);  // Set ALS gain to 20 (higher tolerance)
+    vl6180x_write8(addr, 0x0031, 0xFF);  // Set ALS threshold to maximum (ignore ALS)
+    vl6180x_write8(addr, 0x0040, 0x63);  // Set ALS analog gain to 1.0 (standard)
+    vl6180x_write8(addr, 0x002E, 0x01);  // Enable ALS auto gain
+    vl6180x_write8(addr, 0x001B, 0x00);  // Disable range check based on ambient light
+    vl6180x_write8(addr, 0x003E, 0x31);  // Set range timing to 100ms (standard)
+    vl6180x_write8(addr, 0x0014, 0x24);  // Enable range interrupt
     vl6180x_write8(addr, 0x0016, 0x00);  // Set range error threshold to 0
     
     printf("ToF initialization complete for address 0x%02x\n", addr);
@@ -171,6 +195,13 @@ uint8_t vl6180x_read_range(uint8_t addr) {
     // Get sensor index (0=right, 1=left, 2=front)
     uint8_t sensor_idx = (addr == TOF1_ADDR) ? 0 : (addr == TOF2_ADDR) ? 1 : 2;
     
+    // First verify the sensor is responding
+    uint8_t model_id = vl6180x_read8(addr, 0x0000);
+    if (model_id != 0xB4) {
+        printf("Error: Sensor at 0x%02x not responding (Model ID: 0x%02x)\n", addr, model_id);
+        return 255;
+    }
+    
     // Check if sensor is ready
     uint8_t status = vl6180x_read8(addr, 0x04F);
     if (status & 0x01) {
@@ -180,10 +211,10 @@ uint8_t vl6180x_read_range(uint8_t addr) {
         
         if (status == 0x04) {  // Ambient light overflow
             printf("Ambient light overflow detected. Adjusting sensor configuration...\n");
-            // More aggressive ambient light handling
-            vl6180x_write8(addr, 0x010A, 0x08);  // Reduce ALS integration time to 12.5ms
-            vl6180x_write8(addr, 0x003F, 0x10);  // Reduce ALS gain to 2.5
-            vl6180x_write8(addr, 0x0040, 0x20);  // Reduce ALS analog gain to 0.25
+            // More conservative ambient light handling
+            vl6180x_write8(addr, 0x010A, 0x10);  // Set ALS integration time to 25ms
+            vl6180x_write8(addr, 0x003F, 0x20);  // Set ALS gain to 5
+            vl6180x_write8(addr, 0x0040, 0x40);  // Set ALS analog gain to 0.5
             sleep_ms(50);  // Give sensor time to adjust
             
             // If we have a last valid range, return it instead of 255
@@ -202,12 +233,15 @@ uint8_t vl6180x_read_range(uint8_t addr) {
         return 255;
     }
 
-    // Start measurement
+    // Clear interrupt flags from previous measurement
+    vl6180x_write8(addr, 0x015, 0x07);
+    
+    // Start new measurement
     vl6180x_write8(addr, 0x018, 0x01);
     
     // Wait for measurement to complete
     uint32_t timeout = 0;
-    while ((vl6180x_read8(addr, 0x04f) & 0x07) == 0x00) {
+    while ((vl6180x_read8(addr, 0x04f) & 0x04) == 0x00) {
         sleep_ms(1);
         timeout++;
         if (timeout > 100) {  // 100ms timeout
@@ -219,10 +253,16 @@ uint8_t vl6180x_read_range(uint8_t addr) {
     // Read result
     uint8_t range = vl6180x_read8(addr, 0x062);
     
+    // Clear interrupt flags after reading
+    vl6180x_write8(addr, 0x015, 0x07);
+    
     // If we got a valid reading, update our last valid range
     if (range != 255) {
         last_valid_range[sensor_idx] = range;
         error_count[sensor_idx] = 0;  // Reset error count on successful reading
+        printf("Valid reading from sensor 0x%02x: %d mm\n", addr, range);
+    } else {
+        printf("Invalid reading (255) from sensor 0x%02x\n", addr);
     }
     
     return range;
@@ -263,4 +303,16 @@ uint8_t vl6180x_read8(uint8_t addr, uint16_t reg) {
         return 0xFF;
     }
     return val;
+}
+
+// Check if VL6180X sensor is present
+bool vl6180x_is_present(uint8_t addr) {
+    // Try to read the model ID register
+    uint8_t model_id = vl6180x_read8(addr, 0x0000);
+    return (model_id == 0xB4);  // 0xB4 is the expected model ID
+}
+
+// Read VL6180X model ID
+uint8_t vl6180x_read_model_id(uint8_t addr) {
+    return vl6180x_read8(addr, 0x0000);
 } 
